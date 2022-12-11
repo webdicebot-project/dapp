@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title>Web DiceBot</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/css/bootstrap.min.css"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/jquery@3.6.1/dist/jquery.slim.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.1/dist/umd/popper.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/js/bootstrap.bundle.min.js"></script>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/axios/1.2.1/axios.min.js"></script>
+  </head>
+  <body>
+    <div class="container p-4">
+      <div id="notice" style="display: none">
+        <div class="alert alert-warning">
+          <span id="notification"></span>
+        </div>
+      </div>
+
+      <div id="wallet" class="row">
+        <div class="col-sm-12 p-2">
+          <h4>Wallet</h4>
+
+          <p id="walletBeforeConnect">
+            Please use the wallet's browser or unlock the wallet first if you
+            are using an extension wallet
+            <br />
+            Get wallet at
+            <a href="https://tron.network/wallet" target="_blank">
+              https://tron.network/wallet
+            </a>
+            <br />
+            Recommend TronLink wallet
+          </p>
+
+          <p id="walletInfo" style="display: none">
+            <span id="walletAddress"></span>
+            <br />
+            <span id="walletBalance"></span> TRX
+          </p>
+
+          <button
+            type="button"
+            id="walletConnectButton"
+            class="btn btn-primary"
+            onclick="getTronweb()"
+          >
+            Connect wallet
+          </button>
+        </div>
+      </div>
+
+      <div id="main" class="row" style="display: none">
+        <div class="col-sm-12 p-2">
+          <h4>Buy licenses</h4>
+
+          <div class="form-group">
+            <label>MemberID</label>
+            <input type="text" id="memberid" class="form-control" />
+          </div>
+
+          <div class="form-group">
+            <label>Days</label>
+            <input
+              type="number"
+              id="limit"
+              class="form-control"
+              value="10"
+              onchange="licensePricing()"
+            />
+          </div>
+
+          <p>You must pay: ~<strong id="licensePrice">0</strong> TRX</p>
+
+          <button
+            type="button"
+            id="buyLicenseButton"
+            class="btn btn-primary btn-block"
+            onclick="buyLicense()"
+          >
+            Buy
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const WDB_API = "http://localhost:8000";
+
+      let wallet = {
+        address: "",
+        balance: 0,
+      };
+
+      let trxPrice = 0;
+
+      function makeNotice(msg) {
+        document.getElementById("notice").style.display = "block";
+        document.getElementById("notification").innerText = msg;
+
+        setTimeout(() => {
+          document.getElementById("notice").style.display = "none";
+          document.getElementById("notification").innerText = "";
+        }, 1e3);
+      }
+      async function getTrxPrice() {
+        try {
+          const { data } = await axios.get("https://api-bot.mhqb365.com/price");
+          // console.log(data);
+          trxPrice = data.usd;
+        } catch (error) {
+          console.error(error);
+        }
+      }
+
+      function licensePricing() {
+        try {
+          const pricePerDay = 2 / trxPrice / 10;
+          const limit = document.getElementById("limit").value;
+          let licensePrice = limit * pricePerDay + 1;
+          licensePrice =
+            Math.round((licensePrice + Number.EPSILON) * 1e6) / 1e6;
+          // console.log(licensePrice);
+          document.getElementById("licensePrice").innerText =
+            licensePrice.toFixed(6);
+        } catch (error) {
+          console.error(error);
+        }
+      }
+
+      async function getMyLicenses() {
+        try {
+          const { data } = await axios.get(
+            WDB_API + "/license/web3/me?address=" + wallet.address
+          );
+          console.log(data);
+        } catch (error) {
+          console.error(error);
+        }
+      }
+
+      async function buyLicense() {
+        try {
+          const memberid = document.getElementById("memberid").value;
+          const limit = document.getElementById("limit").value;
+          if (!memberid) return makeNotice("Please enter MemberID");
+          if (!limit)
+            return makeNotice(
+              "Please enter the number of days of use you want"
+            );
+          const payload = {
+            memberid,
+            limit,
+          };
+          document.querySelector("#buyLicenseButton").disabled = true;
+          const { data } = await axios.post(
+            WDB_API + "/license/web3/buy",
+            payload
+          );
+          console.log(data);
+          // document.querySelector("#buyLicenseButton").disabled = false;
+          return sendPayment(data);
+        } catch (error) {
+          console.error(error);
+          makeNotice(error.response.data.message);
+          document.querySelector("#buyLicenseButton").disabled = false;
+        }
+      }
+
+      async function sendPayment(amount) {
+        try {
+          const payment = await tronWeb.trx.sendTransaction(
+            "TLA1pR3nNXgxuvn47dLYP6shhK88GAmhqb",
+            amount
+          );
+          // console.log(payment);
+          if (payment.result) return checkPaymentState(payment.txid);
+        } catch (error) {
+          console.error(error);
+          document.querySelector("#buyLicenseButton").disabled = false;
+          makeNotice(error);
+        }
+      }
+
+      async function checkPaymentState(txid) {
+        try {
+          const id = localStorage.getItem("transactionID");
+          const { data } = await axios.get(
+            WDB_API + "/license/web3/check?id=" + id
+          );
+          console.log(data);
+        } catch (error) {
+          console.error(error);
+        }
+      }
+
+      async function getTronweb() {
+        try {
+          if (window.tronWeb && window.tronWeb.defaultAddress.base58) {
+            const bal = await tronWeb.trx.getBalance(
+              window.tronWeb.defaultAddress.base58
+            );
+            wallet = {
+              address: window.tronWeb.defaultAddress.base58,
+              balance: bal / 1e6,
+            };
+            document.getElementById("walletAddress").innerText = wallet.address;
+            document.getElementById("walletBalance").innerText = wallet.balance;
+            document.getElementById("walletInfo").style.display = "block";
+            document.getElementById("main").style.display = "block";
+            document.getElementById("walletBeforeConnect").remove();
+            document.getElementById("walletConnectButton").remove();
+          } else makeNotice("Please unlock wallet first");
+        } catch (error) {
+          // console.error(error);
+        }
+      }
+
+      window.onload = async () => {
+        await getTrxPrice();
+        licensePricing();
+      };
+    </script>
+  </body>
+</html>
